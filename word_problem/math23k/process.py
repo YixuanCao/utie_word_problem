@@ -6,6 +6,7 @@
 from __future__ import unicode_literals, division, print_function
 import re
 import copy
+import decimal
 
 # sys.path.append('/Users/caoyixuan/Downloads/实验数据/math_pade_da-master')
 from src.pre_data import load_raw_data, transfer_num, check_bracket, allocation, exchange
@@ -101,20 +102,20 @@ def to_float(s):
     m = reg.match(s)
     if m:
         a, b, c = map(to_float, m.groups())
-        return round(a + b / c, 8)
+        return a + b / c
 
     if '(' in s:
         s = re.sub(pattern=r'(\d+)', repl=r'\g<1>.0', string=s, count=1)
-        return round(eval(s), 8)
+        return eval(s)
     s = s.strip('()')
     if '/' in s:
         f1, f2 = s.split('/')
-        return round(float(f1) / float(f2), 8)
+        return float(decimal.Decimal(f1) / decimal.Decimal(f2))
     if s.endswith('%'):
-        return round(float(s[:-1]) / 100., 8)
+        return float(s[:-1]) / 100.
     if s.endswith('percent'):
-        return round(float(s[:-7]) / 100., 8)
-    return round(float(s), 8)
+        return float(s[:-7]) / 100.
+    return float(s)
 
 
 class Tree:
@@ -175,7 +176,7 @@ def consistent_expression_and_answer(value_list, infix_expression, ans_str):
         v = eval_postfix(infix_to_postfix(infix))
         return True, round(v, 5) == round(ans, 5), (ans, v)
     except:
-        print('fail to float {} or {}'.format(ans_str, infix_expression))
+        print('fail to float {} on {}'.format(ans_str, infix_expression))
         return False, None, None
 
 

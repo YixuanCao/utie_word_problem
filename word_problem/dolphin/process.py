@@ -221,7 +221,7 @@ class QuestionAnswerParser:
         # '    the sum of a number plus 1/2 of itself is 18 . 75 . find the number .'
         implied_nums = QuestionAnswerParser.text_implied_nums(new_text)
         numbers_in_text.update(implied_nums)
-        numbers_in_text = {str(to_float(x)) for x in numbers_in_text}
+        numbers_in_text = {str(to_float(x)) for x in numbers_in_text}  # might be incorrect  1.8/100!=0.018
         numbers_in_eqs = {str(to_float(x)) for x in numbers_in_eqs}
 
         if not numbers_in_eqs.issubset(numbers_in_text):
