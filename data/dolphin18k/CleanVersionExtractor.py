@@ -16,12 +16,12 @@ def generate_clean_question_file(diff_file, raw_file, out_clean_question_file):
     fp = open(raw_file)
     word_probs_datas = json.load(fp, encoding='utf8')
     for word_prob_data in word_probs_datas:
-        qid = word_prob_data["id"]
+        qid = word_prob_data["id"] if "sources" not in word_prob_data else word_prob_data["id"].lower()
         #if qid.find("20130905131554AArnMlQ") != -1:
             #print "debug"
         original_text = word_prob_data["original_text"]
         text = original_text
-        diff_oprs = records[qid]  
+        diff_oprs = records[qid]
         for tag, i1, i2, j1, j2, ins_text in reversed(diff_oprs):
             if tag == 'delete':
                 text = text[0:i1] + text[i2:]
