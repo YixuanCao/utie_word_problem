@@ -2,8 +2,8 @@
 import re
 from collections import Counter
 
-from usage_example.word_problem.dolphin.text_num import _extract_nums, SpecialNums, EnglishToNumber
-from usage_example.word_problem.math23k.process import to_float
+from word_problem.dolphin.text_num import _extract_nums, SpecialNums, EnglishToNumber
+from word_problem.math23k.process import to_float
 
 
 def remove_space(t):
