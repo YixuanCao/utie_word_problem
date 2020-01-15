@@ -34,7 +34,7 @@ def print_dict(entities):
     return _pdict
 
 
-def get_answer_value(sample):
+def get_answer_value(sample, v=False):
     def op_is_entity(op):
         return op in entity_to_value
 
@@ -57,7 +57,7 @@ def get_answer_value(sample):
             return oper1 * oper2
         elif ele == '/':
             if oper2 == 0:
-                print('x / 0')
+                print('x / 0', sample)
                 return -10000
             return oper1 / oper2
         elif ele == '^':
@@ -92,11 +92,12 @@ def get_answer_value(sample):
         if round(to_float(sample['info']['q'][-1]), 3) != [round(x['value'], 3) for x in roots][-1]:
             pdict = print_dict(sample['entities'])
             replacer = Replacer(pdict)
-            print(u''.join(sample['info']['q'][0]), u''.join(sample['info']['q'][1]))
-            print(sample['info']['q'][-1])
-            for r in roots:
-                print(r['cum_p'], r['value'], replacer(r['id']))
-            print('')
+            if v:
+                print(u''.join(sample['info']['q'][0]), u''.join(sample['info']['q'][1]))
+                print(sample['info']['q'][-1])
+                for r in roots:
+                    print(r['cum_p'], r['value'], replacer(r['id']))
+                print('')
     return [r['value'] for r in roots]
 
 
@@ -115,12 +116,12 @@ def try_merge_multi_root(sample, roots, pfc):
     pfc.return_neg = False
 
 
-def get_value_correct(predicted):
+def get_value_correct(predicted, v=False):
     correct_set = []
     multi = []
     correct_highest = []
     for i, s in enumerate(predicted):
-        s['my_answer'] = get_answer_value(s)
+        s['my_answer'] = get_answer_value(s, v=v)
         if s['my_answer'] is None:
             correct_set.append(False)
             correct_highest.append(False)
@@ -137,13 +138,15 @@ def get_value_correct(predicted):
     multi = np.asarray(multi)
     correct_set = np.asarray(correct_set)
     output = """
+    -------------------------------------------------------
     samples: {}
     equation acc: {}({}
     answer acc: {}({}
-    #multi & correct in set{}, #multi & correct highest {}
+    #(multi & correct in set),  #(multi & correct highest) {}, {}
+    -------------------------------------------------------
     """.format(len(correct_highest),
-               sum(correct_highest), round(sum(correct_highest) / len(correct_highest) * 100, 2),
-               sum(correct_set), round(sum(correct_set) / len(correct_set) * 100, 2),
+               round(sum(correct_highest) / len(correct_highest) * 100, 2), sum(correct_highest),
+               round(sum(correct_set) / len(correct_set) * 100, 2), sum(correct_set),
                np.bitwise_and(correct_set, multi).sum(), np.bitwise_and(correct_highest, multi).sum())
     print(output)
-    return correct_set
+    return round(sum(correct_highest) / len(correct_highest) * 100, 2)

@@ -129,6 +129,7 @@ class EnglishToNumber:
         'doubled': 'timed by 2',
         'double': '2 time',
         'doubles': '2 times',
+        'thrice': '3 times',
     }
     fraction_replace_dict = {
         'third': '3',
@@ -234,7 +235,7 @@ class EnglishToNumber:
         :return:
         """
         def multiple_f(m):
-            print(m)
+            # print(m)
             matched = m.group()
             return EnglishToNumber.multiple_replace_dict[matched]
 
