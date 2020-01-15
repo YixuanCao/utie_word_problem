@@ -39,6 +39,9 @@ class Text2Int:
         :return:
         """
         current = result = 0
+        words = textnum.split()  # 单独出现million等词时不处理，有少量数据中会在公式中把‘2 million’ 转化为2000000
+        if len(words) == 1 and words[0] in Text2Int.scales:
+            return words[0]
         for word in textnum.split():
             if word not in Text2Int.numwords:
                 raise Exception("Illegal word: " + word)
@@ -61,7 +64,7 @@ class SpecialNums:
     real_num = '\d+\.?\d*'
     percent_re = re.compile(f'({real_num})\s?(?:%|percent)')
     comma_in_num_re = re.compile(r'(\d+),(\d+)(\.\d+)?')
-    mixed_number_re = re.compile(f'(\d+)\s+{frac}')
+    mixed_number_re = re.compile(f'(\d+)\s+{frac}(?!%)')  # ‘33 1/3%’的情况不算在内
 
     @staticmethod
     def remove_comma_in_num(text):
@@ -72,7 +75,9 @@ class SpecialNums:
                 return '{}{}{}'.format(groups[0], groups[1], groups[2])
             else:
                 return '{}{}'.format(groups[0], groups[1])
-        return SpecialNums.comma_in_num_re.sub(repl=comma_f, string=text)
+        for i in range(text.count(',')):
+            text = SpecialNums.comma_in_num_re.sub(repl=comma_f, string=text)
+        return text
 
     @staticmethod
     def mixed_number_to_fraction(text):
@@ -117,7 +122,7 @@ class EnglishToNumber:
     """
 
     # puncts = re.compile(r'[\.\s,\?\n\r\-]')
-    puncts = re.compile(r'\.\s|,\s|\?|\n|\r|-|\s')
+    puncts = re.compile(r'\.\s|,\s|\?|\n|\r|(?<=[\w)])-|\s|\+|=|\$|\(|\)')
 
     multiple_replace_dict = {
         'twice': '2 times',
@@ -145,7 +150,7 @@ class EnglishToNumber:
         'seventieth': '70',
         'eightieth': '80',
         'ninetieth': '90',
-        'hundredth': '/00'
+        'hundredth': '100'
     }
 
     multiple_re = re.compile('twice|double[ds]?|triple[ds]?')
@@ -156,7 +161,28 @@ class EnglishToNumber:
     def handle(text):
         text = EnglishToNumber.english_phrase_to_num(text)
         text = EnglishToNumber.english_multiple_fraction_to_num(text)
+        text = EnglishToNumber.pro_handle(text)
         return text
+
+    @staticmethod
+    def pro_handle(text):
+        text = text.replace('negative ', '-')
+        segs = text.strip().split()
+        new_segs = []
+        for seg in segs:
+            nums = _extract_nums(seg)
+            if nums:
+                pre_end = 0
+                for i, n in nums:
+                    if pre_end < n[0]:
+                        new_segs.append(seg[pre_end:n[0]])
+                    new_segs.append(seg[n[0]:n[1]])
+                    pre_end = n[1]
+                if pre_end < len(seg):
+                    new_segs.append(seg[pre_end:])
+            else:
+                new_segs.append(seg)
+        return ' '.join(new_segs)
 
     @staticmethod
     def split_by_punc(text):
@@ -177,8 +203,7 @@ class EnglishToNumber:
         :param text:
         :return: 空格隔开的单词
         """
-
-        words = EnglishToNumber.split_by_punc(text)
+        words = EnglishToNumber.split_by_punc(text + ' ')  # 不加个' '的话最后一个词会跟末尾的'.'连在一块
         phrase = []  # (word, i)
         phrase_to_digit = {}  # { (i, j, k): 111 }
         new_words = []
@@ -224,8 +249,8 @@ class EnglishToNumber:
         return text
 
 
-frac = r'\d+\s?/\s?\d+'
-num_re = re.compile(f'\d+ {frac}|{frac}|\d+\.\d+\s?%|\d+\s?%|\d+\s?percent|\d+\.\d+|\d+')
+frac = r'\d+\.?\d*\s?/\s?\d+'  # 更新后能提取‘3.5/100’的情况
+num_re = re.compile(f'\d+ {frac}|{frac}|\d+\.\d+\s?%|\d+\s?%|\d+\s?percent|\d+\.\d+|\d+|(?<![\w)])-\d+\.?\d*')
 def _extract_nums(text):
     """在已经做过处理的文本上抽取数字"""
     num_matches = num_re.finditer(text)
