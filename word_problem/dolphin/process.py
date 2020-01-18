@@ -3,8 +3,8 @@ import re
 from collections import Counter
 
 from word_problem.dolphin.text_num import _extract_nums, SpecialNums, EnglishToNumber
-from word_problem.math23k.process import to_float
-
+from word_problem.math23k.process import to_float, Tree, infix_to_postfix, add_significant_number
+from utie.data_label_to_candidate import reid
 
 def remove_space(t):
     return ''.join(t.split())
@@ -15,7 +15,7 @@ class EqParse:
     frac = '{r}\s?/\s?{r}'
     ops = '[\+\-\*\/\=\>\<\(\)\^]|log'
     nums = f'\d+\s+{frac}|{frac}|{r}\s?%|{r}|\d+|(?<![\w)])-{r}'
-    variables = '[a-z]'
+    variables = '[a-z_]+'
 
     nums_re = re.compile(nums)
     variables_re = re.compile(variables)
@@ -39,7 +39,18 @@ class EqParse:
         return text
 
     @staticmethod
-    def parse(t, nums_in_text=None, v=False, only_num=False):
+    def add_omit_zero(text):
+        def omit_f(m):
+            groups = m.groups()
+            for i in groups:
+                if i:
+                    return '0{}'.format(i)
+        omit_re = re.compile('(^\.\d)|((?<=\D)\.\d)')
+        text = omit_re.sub(repl=omit_f, string=text)
+        return text
+
+    @staticmethod
+    def parse(t, nums_in_text=None, v=False, only_num=False, no_percent=False):
         """给定一个公式，进行解析，
         输入 2*y + 12 = 5*x
         返回 2, *, y, +, 12, =, 5, *, x
@@ -51,8 +62,9 @@ class EqParse:
         :param only_num: True 只解析数字，不解析操作符、变量
         """
         success = True
-        t = SpecialNums.handle(t)
+        t = SpecialNums.handle(t, no_percent)
         t = EqParse.add_mul_in_eq(t)
+        t = EqParse.add_omit_zero(t)
         components = []
         if only_num:
             for m in EqParse.nums_re.finditer(t):
@@ -116,7 +128,7 @@ class EqParse:
         return new_components
 
 
-def parse_answer_equations(answer_equations, nums_in_text):
+def parse_answer_equations(answer_equations, nums_in_text, no_percent):
     """
     解析答案里的公式字符串
     :param answer_equations:
@@ -125,37 +137,54 @@ def parse_answer_equations(answer_equations, nums_in_text):
     """
     unkns = []
     equations = []
-    for l in answer_equations.split('\n'):
-        l = l.strip()
-        if l.startswith('unkn:'):
-            unkns = l.split(':')[1].strip().split(',')
-            unkns = [unk.strip() for unk in unkns]
-        elif l.startswith('equ:'):
-            eq = l.split(':')[1].strip()
-            s, eq = EqParse.parse(eq, nums_in_text, v=True)
+    if isinstance(answer_equations, (list, tuple)):
+        for eq in answer_equations:
+            eq = eq.strip().lower()
+            # if '=0' in eq:
+            #     eq = eq.replace('=0', '').replace('-', '=')
+            # elif '= 0' in eq:
+            #     eq = eq.replace('= 0', '').replace('-', '=')
+            s, eq = EqParse.parse(eq, nums_in_text, no_percent=no_percent, v=True)
             if s:
                 equations.append(eq)
-                for e in eq:
-                    # 公式中经常会出现未声明的变量
-                    if e.isalpha() and e not in unkns:
-                        unkns.append(e)
+                unkns = {e for e in eq if e[0].isalpha()}
             else:
                 return False, [], []
+
+    else:
+        for l in answer_equations.split('\n'):
+            l = l.strip()
+            if l.startswith('unkn:'):
+                unkns = l.split(':')[1].strip().split(',')
+                unkns = [unk.strip() for unk in unkns]
+            elif l.startswith('equ:'):
+                eq = l.split(':')[1].strip()
+                s, eq = EqParse.parse(eq, nums_in_text, no_percent=no_percent, v=True,)
+                if s:
+                    equations.append(eq)
+                    for e in eq:
+                        # 公式中经常会出现未声明的变量
+                        if e.isalpha() and e not in unkns:
+                            unkns.append(e)
+                else:
+                    return False, [], []
     return True, unkns, equations
 
 
-def extract_numbers(text):
+def extract_numbers(text, no_percent):
     """
     识别出所有的数字，记录其位置（空格分割的word index），对应的数字
     :param text: 题目
+    :param no_percent: 是否把百分数提取出来， draw数据中为False
     :return text, [['300', (46, 49)], ['40', (71, 73)], ['8', (136, 137)]]
 
     """
     text = text.lower()
     text = text.replace('half m ', 'm/2 ').replace('7 and a half', '7.5 ').replace('39 cents', '0.39')  # 处理了几个特殊情况
-    text = SpecialNums.handle(text)
-    text = EnglishToNumber.handle(text)
-    nums = _extract_nums(text)
+    text = EqParse.add_omit_zero(text)
+    text = SpecialNums.handle(text, no_percent)
+    text = EnglishToNumber.handle(text, no_percent)
+    nums = _extract_nums(text, no_percent)
     return text, nums
 
 
@@ -182,58 +211,61 @@ class QuestionAnswerParser:
         self.qa = qa
         self.success = True
         self.imp = []  # 用来统计公式中出现但文本中未出现数字的数据
-        if not qa['equations']:
-            self.success = False
-        else:
-            self.pair = self.parse()
+
+    def gen_pair(self, no_percent=False):
+        return self.parse(no_percent)
 
     @staticmethod
     def text_implied_nums(text):
         ele_in_text = set()
         ele_in_text.add('1')
         ele_in_text.add('2')
-        ele_in_text.add('0')
-        ele_in_text.add('3.14')
-        ele_in_text.add('3')
-        ele_in_text.add('4')
-        ele_in_text.add('5')
-        if 'consecutive' in text:
-            ele_in_text.add('2')
-            ele_in_text.add('1')
-        if contain_any(text, ['odd', 'even']):
-            ele_in_text.add('2')
+        # ele_in_text.add('0')
+        if contain_any(text, ['radius', 'diameter', 'radians']):
+            ele_in_text.add('3.14')
+        # ele_in_text.add('3')
+        # ele_in_text.add('4')
+        if contain_any(text, ['quadrilateral']):
+            ele_in_text.add('360')
+        if 'three consecutive odd' in text:
+            ele_in_text.add('5')
+        if 'four consecutive' in text or 'consecutive odd' in text:
+            ele_in_text.add('3')
+        # if contain_any(text, ['odd', 'even']):
+        #     ele_in_text.add('2')
         if contain_any(text, ['percent', 'hundred', '%', 'cents', 'penny']):
             ele_in_text.add('100')
-        if contain_any(text, ['square']):
-            ele_in_text.add('2')
+        if contain_any(text, ['quarter', 'square', 'legs', 'rabbits']):
+            ele_in_text.add('4')
+        if contain_any(text, ['trike', ' 1/3 ', 'tripling', 'one third', ' cone ', 'pyramid']):
+            ele_in_text.add('3')
         if contain_any(text, ['hexa']):
             ele_in_text.add('6')
         if contain_any(text, [' min', 'second', ' mph', '/min', 'hour']):
             ele_in_text.add('60')
-        if contain_any(text, ['digit']) or re.search('\d+\s?(mm|dm)', text):
+        if contain_any(text, ['digit', 'tens']) or re.search('\d+\s?(mm|dm)', text):
             ele_in_text.add('10')
-        if contain_any(text, ['opposite']):
-            ele_in_text.add('-1')
-        if contain_any(text, ['complementary']):
+        # if contain_any(text, ['opposite']):
+        #     ele_in_text.add('-1')
+        if contain_any(text, ['complement']):
             ele_in_text.add('90')
-        if contain_any(text, ['supplementary']):
+        if contain_any(text, ['supplement', 'triangle', 'linear pair', 'trigangle', 'radians']):
             ele_in_text.add('180')
         if contain_any(text, ['month', 'year', 'annual']):
             ele_in_text.add('12')
             if contain_any(text, ['day']):
                 ele_in_text.add('30')
-        if contain_any(text, ['km', 'kg', 'milli', 'kilo', 'ml', 'mg', 'liter', 'litre']):
+        if contain_any(text, [' km ', 'kg', 'milli', 'kilo', 'ml', 'mg', 'liter', 'litre', 'thousands']):
             ele_in_text.add('1000')
         # if re.search('\d+\s?(km|kg|milli|kilo|ml|mg)', text) or contain_any(text, ['milli', 'kilo']):
         if re.search('\d+\s?(cm|m)', text) or contain_any(text, ['centimeter']):
             ele_in_text.add('100')
-        if 'feet' in text:
-            if 'inch' in text:
+        if 'inch' in text:
                 ele_in_text.add('12')
-            elif 'yard' in text:
-                ele_in_text.add('3')
-        if re.search('[a-z]%', text):
-            ele_in_text.add('0.01')
+        if 'yard' in text and 'feet' in text:
+            ele_in_text.add('3')
+        # if re.search('[a-z]%', text):
+        #     ele_in_text.add('0.01')
         return ele_in_text
 
     def align_nums(self, text_nums, eq_eles, implied_nums):
@@ -258,38 +290,39 @@ class QuestionAnswerParser:
         return True
 
     @staticmethod
-    def transfer_num(new_text, eqs, numbers_in_eqs, unknowns):  # transfer num into "n"
-        numbers_in_eqs = list(numbers_in_eqs)
-        float_numbers_in_eqs = [round(to_float(n), 5) for n in numbers_in_eqs]
+    def transfer_num(new_text, eqs, numbers_in_eqs, numbers_in_text, unknowns, no_percent):  # transfer num into "n"
+        float_numbers_in_text = [round(to_float(n), 5) for n in numbers_in_text]
         segs = new_text.strip().split()
         new_unkowns = ['x', 'y', 'z']
         try:
             unk_dict = {unk: new_unkowns[i] for i, unk in enumerate(unknowns)}
         except:
-            print('the number of unknowns out of bound')
+            print('the number of unknowns out of bound', unknowns)
         new_segs = []
         num_pos = []
         eq_segs = []
-        nums = []  # 既出现在文本中又出现在公式中的数字
         for i, s in enumerate(segs):
             # 句子中出现类似'm/10'这种公式中的部分内容处理不了
-            if s in numbers_in_eqs:
+            if s in numbers_in_text:
                 new_segs.append('n')
                 num_pos.append(i)
-                nums.append(s)
-            elif _extract_nums(s) and round(to_float(s), 5) in float_numbers_in_eqs:
+            elif _extract_nums(s, no_percent) and round(to_float(s), 5) in float_numbers_in_text:
                 new_segs.append('n')
                 num_pos.append(i)
-                nums.append(s)
             else:
                 new_segs.append(s)
-        float_nums = {to_float(n): str(i) for i, n in enumerate(nums)}
+        float_nums_dict = {round(to_float(n), 5): str(i) for i, n in enumerate(numbers_in_text)}
+        origin_nums_dict = {n: str(i) for i, n in enumerate(numbers_in_text)}
         for eq in eqs:
             eq_seg = []
             for e in eq:
                 if e in numbers_in_eqs:
-                    if to_float(e) in float_nums:
-                        eq_seg.append('N{}'.format(float_nums[to_float(e)]))
+                    if round(to_float(e), 5) in float_nums_dict:
+                        # nums_in_text中既出现2，又出现2.00，优先按origin_nums_dict来找index
+                        if e in origin_nums_dict:
+                            eq_seg.append('N{}'.format(origin_nums_dict[e]))
+                        else:
+                            eq_seg.append('N{}'.format(float_nums_dict[round(to_float(e), 5)]))
                     else:
                         eq_seg.append(e)
                 elif e in unk_dict:
@@ -297,16 +330,15 @@ class QuestionAnswerParser:
                 else:
                     eq_seg.append(e)
             eq_segs.append(eq_seg)
-        pair = (new_segs, eq_segs, nums, num_pos)
-        return pair
+        return new_segs, eq_segs, numbers_in_text, num_pos
 
-    def parse(self):
+    def parse(self, no_percent=False):
         qa = self.qa
-        new_text, nums = extract_numbers(qa['text'])
+        new_text, nums = extract_numbers(qa['text'], no_percent)
         # if ''.join(new_text.split()) != ''.join(s['text'].lower().split()):
         #     print(new_text)
         #     print(s['text'])
-        s, unknowns, eqs = parse_answer_equations(qa['equations'], {x[0] for x in nums})
+        s, unknowns, eqs = parse_answer_equations(qa['equations'], {x[0] for x in nums}, no_percent)
         numbers_in_eqs = set()
         for eq in eqs:
             if not ('>' in eq or '<' in eq):
@@ -341,117 +373,15 @@ class QuestionAnswerParser:
             if not self.align_nums(numbers_in_text, numbers_in_eqs, list(implied_nums)):
                 return None
             else:
-                pair = QuestionAnswerParser.transfer_num(new_text, eqs, numbers_in_eqs, unknowns)
-                return pair
+                pair = QuestionAnswerParser.transfer_num(new_text, eqs, numbers_in_eqs, numbers_in_text, unknowns, no_percent)
+                new_segs, eq_segs, nums, num_pos = pair
+                return new_segs, eq_segs, nums, num_pos, list(implied_nums), qa['ans']
+
 
 operators = set('^+-*/><=()')
 
 
-def op1_lower_2(op1, op2):
-    # 返回 op1 优先级是否低于 op2
-    pdict = {
-        '(': -1,
-        ')': -1,
-        '^': 0,
-        '*': 1,
-        '/': 1,
-        '+': 2,
-        '-': 2
-    }
-    if pdict[op1] > pdict[op2]:
-        return True
-    return False
-
-
-def infix_to_postfix(infix_expression):
-    # 优先级列表
-    # 初始化堆栈和后缀表达式
-    stack = []
-    postfix_expression = []
-    for ele in infix_expression:
-        # 操作数字符直接加入堆栈
-        if ele not in operators:
-            operand = ele
-            postfix_expression.append(operand)
-        else:
-            if stack:  # 堆栈列表不为空
-                if ele == '(':  # '('直接加入堆栈
-                    stack.append(ele)
-                elif ele == ')':
-                    while stack[-1] != '(':
-                        postfix_expression.append(stack.pop())
-                    stack.pop()
-                # 处理处于优先级1的运算符
-                else:
-                    while True:
-                        if len(stack) == 0 or op1_lower_2(stack[-1], ele) or stack[-1] == '(':
-                            stack.append(ele)
-                            break
-                        else:
-                            postfix_expression.append(stack.pop())
-            # 堆栈列表为空，直接加入堆栈
-            else:
-                stack.append(ele)
-    # 获得最终的后缀表达式
-    for i in range(len(stack)):
-        postfix_expression.append(stack.pop())
-    # print(postfix_expression)
-    return postfix_expression
-
-
-def eval_postfix(postfix_expression):
-    # 利用后缀表达式计算结果
-    stack = []
-    for ele in postfix_expression:
-        if ele not in operators:
-            stack.append(ele)
-        else:
-            oper1 = float(stack.pop())
-            oper2 = float(stack.pop())
-            if ele == '+':
-                stack.append(oper2 + oper1)
-            elif ele == '-':
-                stack.append(oper2 - oper1)
-            elif ele == '*':
-                stack.append(oper2 * oper1)
-            elif ele == '/':
-                stack.append(oper2 / oper1)
-            elif ele == '^':
-                stack.append(oper2 ** oper1)
-            else:
-                print('not a valid operator', ele)
-    # print('后缀表达式:', " ".join(postfix_expression))
-    # print('计算结果:', stack[0])
-    return stack[0]
-
-
-class Tree:
-    def __init__(self, name, left, right, t):
-        self.name = 'e{}'.format(name)  # id
-        self.left = left  # value / another tree
-        self.right = right
-        self.t = t  # +-*/
-
-    def is_leaf(self):
-        return not isinstance(self.left, Tree) and not isinstance(self.right, Tree)
-
-    def traverse(self):
-        node_list = []
-        if isinstance(self.left, Tree):
-            left = self.left.name
-            node_list.extend(self.left.traverse())
-        else:
-            left = self.left
-        if isinstance(self.right, Tree):
-            node_list.extend(self.right.traverse())
-            right = self.right.name
-        else:
-            right = self.right
-        node_list.append([self.name, left, right, self.t])
-        return node_list
-
-
-def postfix_to_tree(postfix_expression, rel):
+def postfix_to_tree_with_equal(postfix_expression, rel):
     # 利用后缀表达式计算结果
     stack = []
     i = rel
@@ -485,9 +415,8 @@ def infix_to_relation_with_equal(index, rel_nums, infix_expression):
 
 
 def generate_relations(index, rel_nums, infixs):
-    rel_nums
     relations = []
-    tree = postfix_to_tree(infix_to_postfix(infixs[0]), rel_nums)
+    tree = postfix_to_tree_with_equal(infix_to_postfix(infixs[0]), rel_nums)
     if isinstance(tree, Tree):
         for n in tree.traverse():
             relations.append({'id': n[0], 'operands': [n[1], n[2]], 'type': n[-1]})
@@ -495,7 +424,7 @@ def generate_relations(index, rel_nums, infixs):
         left = relations[-1]['id']
     else:
         left = tree
-    tree = postfix_to_tree(infix_to_postfix(infixs[1]), rel_nums)
+    tree = postfix_to_tree_with_equal(infix_to_postfix(infixs[1]), rel_nums)
     if isinstance(tree, Tree):
         for n in tree.traverse():
             relations.append({'id': n[0], 'operands': [n[1], n[2]], 'type': n[-1]})
@@ -506,3 +435,148 @@ def generate_relations(index, rel_nums, infixs):
     relations.append({'id': 'eq' + str(index), 'operands': [left, right], 'type': '='})
     return relations
 
+
+def data_to_utie(data_path):
+    import json
+    data = json.load(open(data_path))
+    pairs = get_pairs(data)
+    utie_data = pairs_to_utie(pairs, 3)
+    return utie_data
+
+
+def get_pairs(data):
+    pairs = {}
+    for i, s in enumerate(data):
+        if not (s['equations'] and s['text']):
+            continue
+        try:
+            s = bad_data_handle(s)
+            qa_p = QuestionAnswerParser(s)
+            pair = qa_p.gen_pair()
+            if pair[1]:
+                pairs[s['id']] = pair
+        except:
+            pass
+    print('{} samples, {} success to convert to pairs'.format(len(data), len(pairs)))
+    return pairs
+
+
+implied_words = [{'word': '1', 'id': 'sp1'},
+                 {'word': '4', 'id': 'sp4'},
+                 {'word': '5', 'id': 'sp5'},
+                 {'word': '0', 'id': 'sp0'},
+                 {'word': '6', 'id': 'sp6'},
+                 {'word': '60', 'id': 'sp60'},
+                 {'word': '-1', 'id': 'sp-1'},
+                 {'word': '2', 'id': 'sp2'},
+                 {'word': '100', 'id': 'sp100'},
+                 {'word': '360', 'id': 'sp360'},
+                 {'word': '1000', 'id': 'sp1000'},
+                 {'word': '10', 'id': 'sp10'},
+                 {'word': '3', 'id': 'sp3'},
+                 {'word': '30', 'id': 'sp30'},
+                 {'word': '12', 'id': 'sp12'},
+                 {'word': '0.01', 'id': 'sp0.01'},
+                 {'word': '90', 'id': 'sp90'},
+                 {'word': '180', 'id': 'sp180'},
+                 {'word': 'pi', 'id': 'sp_pi'}]
+implied_ents = [{'id': '1', 'tokens': 'sp1', 'type': 'num'},
+                {'id': '4', 'tokens': 'sp4', 'type': 'num'},
+                {'id': '5', 'tokens': 'sp5', 'type': 'num'},
+                {'id': '6', 'tokens': 'sp6', 'type': 'num'},
+                {'id': '60', 'tokens': 'sp60', 'type': 'num'},
+                {'id': '0', 'tokens': 'sp0', 'type': 'num'},
+                {'id': '-1', 'tokens': 'sp-1', 'type': 'num'},
+                {'id': '2', 'tokens': 'sp2', 'type': 'num'},
+                {'id': '100', 'tokens': 'sp100', 'type': 'num'},
+                {'id': '360', 'tokens': 'sp360', 'type': 'num'},
+                {'id': '1000', 'tokens': 'sp1000', 'type': 'num'},
+                {'id': '90', 'tokens': 'sp90', 'type': 'num'},
+                {'id': '180', 'tokens': 'sp180', 'type': 'num'},
+                {'id': '10', 'tokens': 'sp10', 'type': 'num'},
+                {'id': '12', 'tokens': 'sp12', 'type': 'num'},
+                {'id': '3', 'tokens': 'sp3', 'type': 'num'},
+                {'id': '30', 'tokens': 'sp30', 'type': 'num'},
+                {'id': '0.01', 'tokens': 'sp0.01', 'type': 'num'},
+                {'id': 'pi', 'tokens': 'sp_pi', 'type': 'num'}]
+imp_word_dict = {w['word']: w for w in implied_words}
+imp_ent_dict = {w['id']: w for w in implied_ents}
+
+
+def pairs_to_utie(pairs, unk_nums):
+    from collections import OrderedDict
+    new_data = []
+    for pid, pair in pairs.items():
+        x = pair
+        infix_expressions = x[1]
+        relations = []
+        imply_nums = x[-2]
+        imply_ns = []
+        for n in imply_nums:
+            if n == '3.14':
+                imply_ns.append('pi')
+            else:
+                imply_ns.append(n)
+        imply_words = [imp_word_dict[i_num] for i_num in imply_ns]
+        imply_ents = [imp_ent_dict[i_num] for i_num in imply_ns]
+        unk_words = [{'word': 'x', 'id': 'unk1'},
+                        {'word': 'y', 'id': 'unk2'},
+                        {'word': 'z', 'id': 'unk3'}]
+        unk_ents = [{'id': 'x', 'tokens': 'unk1', 'type': 'unk'},
+                       {'id': 'y', 'tokens': 'unk2', 'type': 'unk'},
+                       {'id': 'z', 'tokens': 'unk3', 'type': 'unk'}]
+        extend_words = unk_words[0:unk_nums]
+        extend_ents = unk_ents[0:unk_nums]
+        extend_words.extend(imply_words)
+        extend_ents.extend(imply_ents)
+        for i, infix_expression in enumerate(infix_expressions):
+            infix_exp = []
+            for exp in infix_expression:
+                if exp == '3.14':
+                    infix_exp.append('pi')
+                else:
+                    infix_exp.append(exp)
+            infix_expression = infix_exp
+            try:
+                relations.extend(infix_to_relation_with_equal(i, len(relations), infix_expression))
+            except:
+                print('failed to relations: ', infix_expression)
+        w_dict = {'”': '"', '“': '"', u'”': '"', u'“': '"', '\u3000': ' ', '\uff1f': ' '}
+        sample = {
+            'info': {'sid': pid, 'q': x},
+            'words': [{'word': w_dict.get(w, w), 'id': str(i)} for i, w in enumerate(x[0])] + extend_words,
+            'entities': [{'id': 'N{}'.format(i), 'tokens': str(v), 'type': 'num'} for i, v in
+                         enumerate(x[3])] + extend_ents,
+            'relations': relations
+        }
+        add_significant_number(sample)
+        try:
+            sample = reid(sample, unordered_types=['+', '*', '='], readable=False)
+            sample['relations'] = list(OrderedDict((r['id'], r) for r in sample['relations']).values())
+            new_data.append(sample)
+        except:
+            print('reid falied: ', sample)
+    print('{} pairs, {} success to convert to utie'.format(len(pairs), len(new_data)))
+    return new_data
+
+
+def bad_data_handle(s):
+    if s['id'] == 'yahoo.answers.20100606182013aaboifr':
+        s['equations'] = s['equations'].replace('2*x -11', '2*x - 11')
+    if s['id'] == 'yahoo.answers.20080831103207aaxfkfc':
+        s['equations'] = s['equations'].replace('3+3/8', '27/8')
+    if s['id'] == 'yahoo.answers.20110822104552AA5dVIH':
+        s['equations'] = s['equations'].replace('1.4', '(1 + 0.4)')
+    if s['id'] == 'yahoo.answers.20110209203154AAE7Sz4':
+        s['equations'] = s['equations'].replace('600', '200 * 3')
+    if s['id'] == 'yahoo.answers.20070501114420AAd9oYf':
+        s['equations'] = s['equations'].replace('/0', '/40')
+    if s['id'] == 'yahoo.answers.20071117163907AAzuPdi':
+        s['ans'] = '20/3 or 55'
+    if s['id'] == 'yahoo.answers.20071117163907AAzuPdi':
+        s['ans'] = '1/12'
+    if s['id'] == 'yahoo.answers.20080117232720AAfxYrt':
+        s['text'] = s['text'].replace('0.3', '. 3')
+    if s['id'] == 'yahoo.answers.20080916195022AAQsn1l':
+        s['text'] = s['text'].replace('165.000', '165,000')
+    return s
