@@ -69,6 +69,10 @@ def get_real_ans(origin_eqs, values, precision):
             else:
                 new_eq.append(e)
         new_eq = ''.join(new_eq).split('=')
+        if len(new_eq) < 2:
+            print(new_eq)
+            print(eq)
+            continue
         new_eq = '{}-({})'.format(new_eq[0], new_eq[1])
         new_eqs.append(new_eq)
     real_ans = solve_equations(new_eqs, precision)
@@ -94,12 +98,21 @@ def predict_relation_to_eqs(predict_sample):
         else:
             return op
 
+    def op_id_to_term(op):
+        if op in ent2v:
+            return ent2v[op]
+        if op in rel2eq:
+            return rel2eq[op]
+        print(op)
+        raise ValueError()
+
     rel2eq = {}
     _, origin_eqs, values, _, _, origin_ans = predict_sample['info']['q']
     idx = 0
     wid2value = {}
     ent2v = {}
     eqs = []
+    eq_corresponding_rids = []
     for i, w in enumerate(predict_sample['words']):
         if w['word'] == 'n' and not predict_sample['words'][i + 1]['word'].startswith('##'):
             wid2value[w['id']] = values[idx]
@@ -113,17 +126,22 @@ def predict_relation_to_eqs(predict_sample):
             else:
                 ent2v[e['id']] = wid2value[e['tokens']]
     for rel in predict_sample['relations']:
+        op0 = op_id_to_term(rel['operands'][0])
+        op1 = op_id_to_term(rel['operands'][1])
         if rel['type'] != '=':
-            rel2eq[rel['id']] = '({}{}{})'.format(rel['operands'][0], rel['type'], rel['operands'][1])
+            rel2eq[rel['id']] = '({}{}{})'.format(op0, rel['type'], op1)
         if rel['type'] == '=':
-            eqs.append('{}-{}'.format(rel['operands'][0], rel['operands'][1]))
+            eq = '{}-{}'.format(op0, op1)
+            eqs.append(eq)
+            eq_corresponding_rids.append(rel['id'])
     rel2eq = sorted(rel2eq.items(), key=lambda x: len(x[0]), reverse=True)
-    predict_eqs = []
-    for eq in eqs:
-        eq = replace_eq(eq, rel2eq)
-        eq = replace_v(eq, ent2v)
-        predict_eqs.append(eq)
-    return predict_eqs
+    # predict_eqs = []
+    # for eq in eqs:
+    #     eq = replace_eq(eq, rel2eq)
+    #     eq = replace_v(eq, ent2v)
+    #     predict_eqs.append(eq)
+    predict_eqs = eqs
+    return predict_eqs, eq_corresponding_rids
 
 
 def process_dolphin_ans(origin_ans, precision):
@@ -154,7 +172,7 @@ def process_dolphin_ans(origin_ans, precision):
 
 
 def evaluate(log_path, data_path, precision=3, dolphin=False):
-    tppl = TestPipeline(log_path, data_path=data_path, config_path=None)
+    tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=True)
     performance, indicator, wrong_sids, correct_sids = tppl.evaluate()
     predict_samples = tppl.predicted
     sample_num = len(predict_samples)
@@ -162,7 +180,7 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
     right_num = 0
     right_num_fixed = 0
     for predict_sample in avail_results:
-        predict_eqs = predict_relation_to_eqs(predict_sample)
+        predict_eqs, _ = predict_relation_to_eqs(predict_sample)
         _, origin_eqs, values, _, _, origin_ans = predict_sample['info']['q']
         if dolphin:
             origin_ans = process_dolphin_ans(origin_ans, precision)
@@ -195,6 +213,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('log_path')
     parser.add_argument('data_path')
-    parser.add_argument('precision')
+    parser.add_argument('precision', type=int)
     parser = parser.parse_args()
     evaluate(parser.log_path, parser.data_path, parser.precision)
