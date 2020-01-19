@@ -97,8 +97,6 @@ def parse_align(problem):
     align_info = {}  # 变量名: [token id, value]
     for align in problem['Alignment']:
         align_info[align['coeff']] = [sent_id_to_offset[align['SentenceId']] + align['TokenId'], align['Value']]
-
-
     return check()
 
 
@@ -243,4 +241,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-=======
