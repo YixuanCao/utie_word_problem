@@ -131,8 +131,9 @@ class EnglishToNumber:
         'doubled': 'timed by 2',
         'double': '2 time',
         'doubles': '2 times',
-        'thrice': '3 times',
-        'twine': '2 times'
+        'twine': '2 times',
+        'tripled': 'timed by 3',
+        'triples': '3 times'
     }
     fraction_replace_dict = {
         'third': '3',
