@@ -95,10 +95,11 @@ class SpecialNums:
         return SpecialNums.percent_re.sub(f, text)
 
     @staticmethod
-    def handle(text):
+    def handle(text, no_percent):
         text = SpecialNums.remove_comma_in_num(text)
         text = SpecialNums.mixed_number_to_fraction(text)
-        text = SpecialNums.percentage_to_fraction(text)
+        if not no_percent:
+            text = SpecialNums.percentage_to_fraction(text)
         return text
 
     @staticmethod
@@ -126,10 +127,12 @@ class EnglishToNumber:
 
     multiple_replace_dict = {
         'twice': '2 times',
+        'thrice': '3 times',
         'doubled': 'timed by 2',
         'double': '2 time',
         'doubles': '2 times',
         'thrice': '3 times',
+        'twine': '2 times'
     }
     fraction_replace_dict = {
         'third': '3',
@@ -154,24 +157,27 @@ class EnglishToNumber:
         'hundredth': '100'
     }
 
-    multiple_re = re.compile('twice|double[ds]?|triple[ds]?')
-    fraction_re = re.compile('(?:1\s|1|)(half)|(\d+)\s?(third|fou?rth|quarter|fifth|sixth|seventh|eighth|ninth|'
+    multiple_re = re.compile('twine|twice|thrice|double[ds]?|triple[ds]?')
+    fraction_re = re.compile('(?:1\s|1|)(half)|(\d+)\s?(third|fou?rth|quarter|fifth|sixth|seventh|eighth|ninths|'
                              'tenth|twentieth|thirtieth|fou?rtieth|fiftieth|sixtieth|hundredth)s?')
 
     @staticmethod
-    def handle(text):
+    def handle(text, no_percent):
         text = EnglishToNumber.english_phrase_to_num(text)
         text = EnglishToNumber.english_multiple_fraction_to_num(text)
-        text = EnglishToNumber.pro_handle(text)
+        text = EnglishToNumber.pro_handle(text, no_percent)
         return text
 
     @staticmethod
-    def pro_handle(text):
-        text = text.replace('negative ', '-')
+    def pro_handle(text, no_percent):
+        if not no_percent:
+            text = text.replace('negative ', '-')
+        else:
+            text = text.replace('negative', 'negative -1').replace('2 numbers', 'two numbers').replace('1 number', 'one number')
         segs = text.strip().split()
         new_segs = []
         for seg in segs:
-            nums = _extract_nums(seg)
+            nums = _extract_nums(seg, no_percent)
             if nums:
                 pre_end = 0
                 for i, n in nums:
@@ -252,9 +258,15 @@ class EnglishToNumber:
 
 frac = r'\d+\.?\d*\s?/\s?\d+'  # 更新后能提取‘3.5/100’的情况
 num_re = re.compile(f'\d+ {frac}|{frac}|\d+\.\d+\s?%|\d+\s?%|\d+\s?percent|\d+\.\d+|\d+|(?<![\w)])-\d+\.?\d*')
-def _extract_nums(text):
+num_re_no_percent = re.compile(f'\d+ {frac}|{frac}|\d+\.\d+|\d+|(?<![\w)])-\d+\.?\d*')
+
+
+def _extract_nums(text, no_percent):
     """在已经做过处理的文本上抽取数字"""
-    num_matches = num_re.finditer(text)
+    if no_percent:
+        num_matches = num_re_no_percent.finditer(text)
+    else:
+        num_matches = num_re.finditer(text)
     nums = []
     if num_matches:
         for m in num_matches:
