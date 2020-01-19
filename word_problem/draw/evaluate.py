@@ -140,8 +140,34 @@ def predict_relation_to_eqs(predict_sample):
     return predict_eqs, eq_corresponding_rids
 
 
+def to_float(s):
+    """把string变成float
+    可以处理的形式： (1)/3  (1/(3))   1/3  30%
+    round 是因为计算不精确 1.8 / 100 = 0.018000000000000002
+    """
+    import decimal
+    r = r'\d+\.?\d*'
+    reg = re.compile(r'({r})\(\(?({r})\)?/\(?({r})\)?\)'.format(r=r))  # 1 3/4 = 1+3/4
+    m = reg.match(s)
+    if m:
+        a, b, c = map(to_float, m.groups())
+        return a + b / c
+
+    if '(' in s:
+        s = re.sub(pattern=r'(\d+)', repl=r'\g<1>.0', string=s, count=1)
+        return eval(s)
+    s = s.strip('()')
+    if '/' in s:
+        f1, f2 = s.split('/')
+        return float(decimal.Decimal(f1) / decimal.Decimal(f2))
+    if s.endswith('%'):
+        return float(s[:-1]) / 100.
+    if s.endswith('percent'):
+        return float(s[:-7]) / 100.
+    return float(s)
+
+
 def process_dolphin_ans(origin_ans, precision):
-    from word_problem.math23k.process import to_float
     unks = ['x', 'y', 'z']
     if '|' in origin_ans:
         origin_ans = origin_ans.split('|')[0]
@@ -165,7 +191,6 @@ def process_dolphin_ans(origin_ans, precision):
     except:
         print('wrong format of origin answer:', origin_ans)
     return origin_ans
-
 
 
 def evaluate(log_path, data_path, precision=3, dolphin=False):
