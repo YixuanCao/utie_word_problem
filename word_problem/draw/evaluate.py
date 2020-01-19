@@ -183,11 +183,11 @@ def process_dolphin_ans(origin_ans, precision):
                     ans = [ans]
                 for i, a in enumerate(ans):
                     new_origin_ans.append((unks[i], round(to_float(re.sub('km\^2|/?[a-zA-Z]|\s', '', a)), precision)))
-            origin_ans = set(new_origin_ans)
+            origin_ans = new_origin_ans
         else:
             origin_ans = origin_ans.strip('{} ?$').split(';')
             #             origin_ans = {(unks[i], round(to_float(re.sub('km\^2|/?[a-zA-Z]|\s', '', a)), 3)) for i, a in enumerate(origin_ans)}
-            origin_ans = {round(to_float(re.sub('km\^2|/?[a-zA-Z]|\s', '', a)), precision) for i, a in enumerate(origin_ans)}
+            origin_ans = [round(to_float(re.sub('km\^2|/?[a-zA-Z]|\s', '', a)), precision) for i, a in enumerate(origin_ans)]
     except:
         print('wrong format of origin answer:', origin_ans)
     return origin_ans
@@ -202,7 +202,11 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
     right_num = 0
     right_num_fixed = 0
     for predict_sample in avail_results:
-        predict_eqs, _ = predict_relation_to_eqs(predict_sample)
+        try:
+            predict_eqs, _ = predict_relation_to_eqs(predict_sample)
+        except:
+            print('relation to eq failed:', predict_sample)
+            continue
         _, origin_eqs, values, _, _, origin_ans = predict_sample['info']['q']
         if dolphin:
             origin_ans = process_dolphin_ans(origin_ans, precision)
@@ -214,7 +218,7 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
             right_num_fixed += 1
         else:
             print('predict_answer not equal to real_answer: ', predict_eqs, predict_ans, origin_equations, real_ans)
-        if predict_ans and set(predict_ans).issubset(origin_ans):
+        if predict_ans and set(predict_ans).issubset(set(origin_ans)):
             right_num += 1
         else:
             print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans)

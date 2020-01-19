@@ -233,6 +233,27 @@ def bad_draw_handle(s):
     return s
 
 
+def five_fold_split(data, valid_idx):
+    assert 0 <= valid_idx < 5
+    fold_size = int(float(len(data)) / float(5))
+    train = []
+    valid = []
+    test = []
+    fold_idx = [0, 1, 2, 3, 4, 0]
+    for i in range(5):
+        s = i * fold_size
+        e = (i + 1) * fold_size
+        if i == 4:
+            e = len(data)
+        if i == fold_idx[valid_idx]:
+            valid.extend(data[s: e])
+        elif i == fold_idx[valid_idx + 1]:
+            test.extend(data[s: e])
+        else:
+            train.extend(data[s: e])
+    return train, valid, test
+
+
 def main():
     import json
     draw_raw = json.load(open('data/EACL/draw.json'))
