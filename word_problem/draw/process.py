@@ -7,11 +7,12 @@ Annotating Derivations: A New Evaluation Strategy and Dataset for Algebra Word P
 
 
 delphin: 831,  500 60% 成功
-draw 1k : 1000, 905 90% 成功, 最高 59.5
-kushman: 514, 430 83% 成功, 最高 83
+draw 1k : 1000, 905 90% 成功, 最高 59.5, 主要问题在 dime, nickle, 可以考虑把他们也作为数字
+kushman (alg514): 514, 430 83% 成功, 最高 83
 """
 
 from word_problem.dolphin.process import EqParse, to_float, EnglishToNumber, SpecialNums
+from utie.common import ReSegment
 
 
 def parse_align(problem):
@@ -94,4 +95,16 @@ def parse_align(problem):
     align_info = {}  # 变量名: [token id, value]
     for align in problem['Alignment']:
         align_info[align['coeff']] = [sent_id_to_offset[align['SentenceId']] + align['TokenId'], align['Value']]
+
+
     return check()
+
+
+def main():
+    import json
+    draw_raw = json.load(open('data/EACL/draw.json'))
+    sum(parse_align(q) for q in draw_raw)
+
+
+if __name__ == '__main__':
+    main()
