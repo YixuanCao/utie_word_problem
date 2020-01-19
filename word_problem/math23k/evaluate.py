@@ -6,7 +6,7 @@ import itertools
 
 import numpy as np
 
-from usage_example.word_problem.math23k.process import to_float
+from word_problem.math23k.process import to_float
 from utie.common import Replacer
 from utie.graph_common import remove_ancestors
 
