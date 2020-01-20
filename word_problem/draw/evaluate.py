@@ -25,11 +25,8 @@ def solve_equations(equations, precision):
     :return: 方程的解, 唯一解时按[x,y,z]的先后顺序排列，省略未知数信息，有多个解时会保留对应的未知数信息
     """
     from sympy import solve, Symbol
-    x = Symbol('x')
-    y = Symbol('y')
-    z = Symbol('z')
+    Symbol('x y z')
     try:
-        equations = [eval(eq) for eq in equations]
         answer = solve(equations)
     except:
         answer = []
@@ -66,6 +63,35 @@ def get_real_ans(origin_eqs, values, precision):
                     new_eq.append('({})'.format(e))
                 else:
                     new_eq.append(e)
+            else:
+                new_eq.append(e)
+        new_eq = ''.join(new_eq).split('=')
+        new_eq = '{}-({})'.format(new_eq[0], new_eq[1])
+        new_eqs.append(new_eq)
+    real_ans = solve_equations(new_eqs, precision)
+    return real_ans, new_eqs
+
+
+def get_real_ans_multi(origin_eqs, values, precision):
+    """
+    :param origin_eqs: 对应标注数据中的公式 [['x', '=', 'y', '-', 'N1'],['N2', '*', 'x', '-', 'N3', '*', 'y', '=', 'N4']]
+    :param values: 文本中nums对应的values列表 ['1', '4', '2', '5', '-11'],
+    :param precision: 答案保留的精度
+    :return: 公式对应的解的集合，有多个解时会保留对应的未知数信息, 以及原方程的变形， x-1=y --> x-1-y
+    """
+    new_eqs = []
+    idx = 0
+    value_idx_dict = {}
+    for v in values:
+        if str(round(to_float(v), 5)) not in value_idx_dict.values():
+            value_idx_dict[idx] = str(round(to_float(v), 5))
+            idx += 1
+    for eq in origin_eqs:
+        new_eq = []
+        for e in eq:
+            if e[0] == 'N':
+                e = value_idx_dict[int(e[1:])]
+                new_eq.append(e)
             else:
                 new_eq.append(e)
         new_eq = ''.join(new_eq).split('=')
@@ -140,6 +166,50 @@ def predict_relation_to_eqs(predict_sample):
     return predict_eqs, eq_corresponding_rids
 
 
+def predict_relation_to_eqs_multi(predict_sample):
+
+    def op_id_to_term(op):
+        if op in ent2v:
+            return ent2v[op]
+        if op in rel2eq:
+            return rel2eq[op]
+        print(op)
+        raise ValueError()
+
+    rel2eq = {}
+    _, origin_eqs, _, values_dict, _, origin_ans = predict_sample['info']['q']
+    wid_value_dict = {}
+    for v in values_dict:
+        for wid in values_dict[v]:
+            wid_value_dict[wid] = v
+    wid2value = {}
+    ent2v = {}
+    eqs = []
+    eq_corresponding_rids = []
+    for i, w in enumerate(predict_sample['words']):
+        if w['word'] == 'n' and not predict_sample['words'][i + 1]['word'].startswith('##'):
+            wid2value[w['id']] = wid_value_dict[w['id'][1:w['id'].index('|')]]
+        else:
+            wid2value[w['id']] = w['word']
+    for e in predict_sample['entities']:
+        if e['tokens'][0] in wid2value:
+            if '/' in wid2value[e['tokens'][0]]:
+                ent2v[e['id']] = '({})'.format(wid2value[e['tokens'][0]])
+            else:
+                ent2v[e['id']] = wid2value[e['tokens'][0]]
+    for rel in predict_sample['relations']:
+        op0 = op_id_to_term(rel['operands'][0])
+        op1 = op_id_to_term(rel['operands'][1])
+        if rel['type'] != '=':
+            rel2eq[rel['id']] = '({}{}{})'.format(op0, rel['type'], op1)
+        if rel['type'] == '=':
+            eq = '{}-{}'.format(op0, op1)
+            eqs.append(eq)
+            eq_corresponding_rids.append(rel['id'])
+    predict_eqs = eqs
+    return predict_eqs, eq_corresponding_rids
+
+
 def to_float(s):
     """把string变成float
     可以处理的形式： (1)/3  (1/(3))   1/3  30%
@@ -193,6 +263,16 @@ def process_dolphin_ans(origin_ans, precision):
     return origin_ans
 
 
+def include_origin_eqs(predict_eqs, origin_eqs_length, origin_ans, precision):
+    import itertools
+    combs = itertools.combinations(predict_eqs, origin_eqs_length)
+    for comb in combs:
+        comb_eqs_ans = solve_equations(comb, precision)
+        if set(comb_eqs_ans) == set(origin_ans):
+            return comb, comb_eqs_ans
+    return [], []
+
+
 def evaluate(log_path, data_path, precision=3, dolphin=False):
     tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=True)
     performance, indicator, wrong_sids, correct_sids = tppl.evaluate()
@@ -201,8 +281,10 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
     avail_results = filted_data(predict_samples)
     right_num = 0
     right_num_fixed = 0
+    include_num = 0
     for predict_sample in avail_results:
         try:
+            # predict_eqs, _ = predict_relation_to_eqs_multi(predict_sample)
             predict_eqs, _ = predict_relation_to_eqs(predict_sample)
         except:
             print('relation to eq failed:', predict_sample)
@@ -213,24 +295,40 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
         else:
             origin_ans = [round(float(v), precision) for v in origin_ans]
         real_ans, origin_equations = get_real_ans(origin_eqs, values, precision)
+        # real_ans, origin_equations = get_real_ans_multi(origin_eqs, values, precision)
         predict_ans = solve_equations(predict_eqs, precision)
-        if set(predict_ans) == set(real_ans):
+        comb, comb_eqs_ans = include_origin_eqs(predict_eqs, len(origin_equations), origin_ans, precision)
+        if comb:
+            include_num += 1
+            if len(predict_eqs) > len(origin_equations):
+                print('predict_eqs include origin_eqs:', predict_eqs, comb, comb_eqs_ans, origin_equations, origin_ans, real_ans)
+        if real_ans and set(predict_ans) == set(real_ans):
             right_num_fixed += 1
+            # print(predict_sample)
+            print('predict_answer equal to real_answer:', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
         else:
-            print('predict_answer not equal to real_answer: ', predict_eqs, predict_ans, origin_equations, real_ans)
-        if predict_ans and set(predict_ans).issubset(set(origin_ans)):
-            right_num += 1
+            print('predict_answer not equal to real_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
+        if dolphin:
+            if predict_ans and set(predict_ans).issubset(set(origin_ans)):
+                right_num += 1
+            else:
+                print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
         else:
-            print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans)
+            if predict_ans and set(predict_ans) == set(origin_ans):
+                right_num += 1
+            else:
+                print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
     output = """
     -------------------------------------------------------
     test_performance: {}
     answer compared with origin acc: {}({})
     answer compared with real acc: {}({})
+    predict equations included origin equations acc: {}({})
     -------------------------------------------------------
     """.format(performance,
                round(float(right_num) / float(sample_num) * 100, 2), right_num,
-               round(float(right_num_fixed) / float(sample_num) * 100, 2), right_num_fixed
+               round(float(right_num_fixed) / float(sample_num) * 100, 2), right_num_fixed,
+               round(float(include_num) / float(sample_num) * 100, 2), include_num,
                )
     print(output)
 
