@@ -2,6 +2,7 @@
 
 import argparse
 from utie.test_pipeline import TestPipeline
+import itertools
 import regex as re
 
 
@@ -42,6 +43,7 @@ def solve_equations(equations, precision):
             #             real_ans = {(k, round(float(v), 3)) for k, v in real_ans.items()}
             answer = [round(float(v), precision) for k, v in answer.items()]
     except:
+        answer = []
         print('wrong format of answer: ', answer)
     return answer
 
@@ -186,6 +188,7 @@ def predict_relation_to_eqs_multi(predict_sample):
     ent2v = {}
     eqs = []
     eq_corresponding_rids = []
+    eq2prob_dict = {}
     for i, w in enumerate(predict_sample['words']):
         if w['word'] == 'n' and not predict_sample['words'][i + 1]['word'].startswith('##'):
             wid2value[w['id']] = wid_value_dict[w['id'][1:w['id'].index('|')]]
@@ -205,9 +208,10 @@ def predict_relation_to_eqs_multi(predict_sample):
         if rel['type'] == '=':
             eq = '{}-{}'.format(op0, op1)
             eqs.append(eq)
+            eq2prob_dict[eq] = rel['cum_p']
             eq_corresponding_rids.append(rel['id'])
     predict_eqs = eqs
-    return predict_eqs, eq_corresponding_rids
+    return predict_eqs, eq_corresponding_rids, eq2prob_dict
 
 
 def to_float(s):
@@ -264,7 +268,6 @@ def process_dolphin_ans(origin_ans, precision):
 
 
 def include_origin_eqs(predict_eqs, origin_eqs_length, origin_ans, precision):
-    import itertools
     combs = itertools.combinations(predict_eqs, origin_eqs_length)
     for comb in combs:
         comb_eqs_ans = solve_equations(comb, precision)
@@ -273,19 +276,74 @@ def include_origin_eqs(predict_eqs, origin_eqs_length, origin_ans, precision):
     return [], []
 
 
+def cumulative_prob(sample):
+    def op_is_entity(op):
+        return op not in relation_dict
+
+    def op2p(op):
+        if op_is_entity(op):
+            return 1.
+        return relation_dict[op]['cum_p']
+
+    relation_dict = {r['id']: r for r in sample['relations']}
+    for r in sample['relations']:
+        p = r['prob']
+        for op in r['operands']:
+            p = p * op2p(op)
+        r['cum_p'] = p
+    return sample
+
+
+def get_predict_unks_num(predict_eqs):
+    unks_num = 0
+    for eq in predict_eqs:
+        num = 0
+        if 'x' in eq:
+            num += 1
+        if 'y' in eq:
+            num += 1
+        if 'z' in eq:
+            num += 1
+        if unks_num < num:
+            unks_num = num
+    return unks_num
+
+
+def get_predict_eq_comb(predict_eqs, unks_num, eq2prob_dict, precision):
+    combs = itertools.combinations(predict_eqs, unks_num)
+    max_prob = 0
+    max_comb = ()
+    max_comb_ans = []
+    for comb in combs:
+        answer = solve_equations(comb, precision)
+        if answer:
+            comb_prob = 1.0
+            for eq in comb:
+                comb_prob = eq2prob_dict[eq] * comb_prob
+            if comb_prob > max_prob:
+                max_prob = comb_prob
+                max_comb = comb
+                max_comb_ans = answer
+    return max_comb, max_comb_ans, max_prob
+
+
 def evaluate(log_path, data_path, precision=3, dolphin=False):
-    tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=True)
+    tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=False)
     performance, indicator, wrong_sids, correct_sids = tppl.evaluate()
     predict_samples = tppl.predicted
     sample_num = len(predict_samples)
     avail_results = filted_data(predict_samples)
     right_num = 0
     right_num_fixed = 0
+    right_comb_num = 0
     include_num = 0
     for predict_sample in avail_results:
+        predict_sample = cumulative_prob(predict_sample)
         try:
-            # predict_eqs, _ = predict_relation_to_eqs_multi(predict_sample)
-            predict_eqs, _ = predict_relation_to_eqs(predict_sample)
+            predict_eqs, _, eq2prob_dict = predict_relation_to_eqs_multi(predict_sample)
+            # predict_eqs, _ = predict_relation_to_eqs(predict_sample)
+            unks_num = get_predict_unks_num(predict_eqs)
+            eq_comb, comb_ans, comb_cum_p = get_predict_eq_comb(predict_eqs, unks_num, eq2prob_dict, precision)
         except:
             print('relation to eq failed:', predict_sample)
             continue
@@ -294,25 +352,29 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
             origin_ans = process_dolphin_ans(origin_ans, precision)
         else:
             origin_ans = [round(float(v), precision) for v in origin_ans]
-        real_ans, origin_equations = get_real_ans(origin_eqs, values, precision)
-        # real_ans, origin_equations = get_real_ans_multi(origin_eqs, values, precision)
+        # real_ans, origin_equations = get_real_ans(origin_eqs, values, precision)
+        real_ans, origin_equations = get_real_ans_multi(origin_eqs, values, precision)
         predict_ans = solve_equations(predict_eqs, precision)
         comb, comb_eqs_ans = include_origin_eqs(predict_eqs, len(origin_equations), origin_ans, precision)
         if comb:
             include_num += 1
             if len(predict_eqs) > len(origin_equations):
                 print('predict_eqs include origin_eqs:', predict_eqs, comb, comb_eqs_ans, origin_equations, origin_ans, real_ans)
+        if comb_ans:
+            if set(comb_ans) == set(real_ans):
+                right_comb_num += 1
+                print('predict_comb equal to origin_eqs:', predict_eqs, eq_comb, comb_cum_p, comb_ans, origin_equations, origin_ans, real_ans)
         if real_ans and set(predict_ans) == set(real_ans):
             right_num_fixed += 1
             # print(predict_sample)
-            print('predict_answer equal to real_answer:', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
-        else:
-            print('predict_answer not equal to real_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
+            # print('predict_answer equal to real_answer:', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
+        # else:
+        #     print('predict_answer not equal to real_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
         if dolphin:
             if predict_ans and set(predict_ans).issubset(set(origin_ans)):
                 right_num += 1
-            else:
-                print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
+            # else:
+            #     print('predict_answer not equal to origin_answer: ', predict_eqs, predict_ans, origin_equations, origin_ans, real_ans)
         else:
             if predict_ans and set(predict_ans) == set(origin_ans):
                 right_num += 1
@@ -321,11 +383,13 @@ def evaluate(log_path, data_path, precision=3, dolphin=False):
     output = """
     -------------------------------------------------------
     test_performance: {}
+    predict comb acc: {}({})
     answer compared with origin acc: {}({})
     answer compared with real acc: {}({})
     predict equations included origin equations acc: {}({})
     -------------------------------------------------------
     """.format(performance,
+               round(float(right_comb_num) / float(sample_num) * 100, 2), right_comb_num,
                round(float(right_num) / float(sample_num) * 100, 2), right_num,
                round(float(right_num_fixed) / float(sample_num) * 100, 2), right_num_fixed,
                round(float(include_num) / float(sample_num) * 100, 2), include_num,
