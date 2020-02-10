@@ -11,7 +11,6 @@ draw 1k : 1000, 905 90% 成功, 最高 59.5, 主要问题在 dime, nickle, 可�
 kushman (alg514): 514, 430 83% 成功, 最高 83
 """
 
-from utie.common import ReSegment
 from word_problem.dolphin.process import EqParse, QuestionAnswerParser, extract_numbers, parse_answer_equations, pairs_to_utie
 from word_problem.math23k.process import to_float
 from word_problem.dolphin.text_num import EnglishToNumber, SpecialNums
@@ -142,6 +141,8 @@ class DQuestionAnswerParser(QuestionAnswerParser):
             implied_nums.add('2')
         if ' even ' in text or ' odd ' in text:
             implied_nums.add('2')
+        if 'minutes' in text and ' mph ' in text:
+            implied_nums.add('60')
 
         return text, implied_nums
 
@@ -172,33 +173,29 @@ class DQuestionAnswerParser(QuestionAnswerParser):
             for eq in eqs:
                 if not ('>' in eq or '<' in eq):
                     numbers_in_eqs.update([ele for ele in eq if EqParse.ele_type(ele) == 'num'])
-            if not self.align_nums(numbers_in_text, numbers_in_eqs, list(implied_nums)):
-                return None
-            else:
-                pair = self.transfer_num(new_text, eqs, numbers_in_eqs, numbers_in_text, unknowns, no_percent)
-                new_segs, eq_segs, nums, num_pos = pair
-                return new_segs, eq_segs, nums, num_pos, list(implied_nums), qa['lSolutions']
+            pair = self.transfer_num(new_text, eqs, numbers_in_eqs, numbers_in_text, unknowns, no_percent)
+            new_segs, eq_segs, nums, num_pos = pair
+            return new_segs, eq_segs, nums, num_pos, list(implied_nums), qa['lSolutions']
 
 
 def draw_data_to_utie(data_path):
     import json
     draw_data = json.load(open(data_path))
     pairs = draw_data_to_pairs(draw_data)
-    draw_utie = pairs_to_utie(pairs, 2)
+    draw_utie = pairs_to_utie(pairs, 2, multi=True)
     return draw_utie
 
 
 def draw_data_to_pairs(draw_data):
     pairs = {}
     for i, s in enumerate(draw_data):
-        if s['Equiv']:
-            continue
+        # if s['Equiv']:
+        #     continue
         s = bad_draw_handle(s)
         try:
             qa_p = DQuestionAnswerParser(s)
             pair = qa_p.gen_pair(True)
-            if pair[2]:
-                pairs[s['iIndex']] = pair
+            pairs[str(i)] = pair
         except:
             print('Data to pair failed: ', s)
             pass
@@ -230,6 +227,10 @@ def bad_draw_handle(s):
         s['lEquations'] = ['40 / 2 * x + 40 / 2 * y = 1.05 *( 40 )', 'y=(x-0.3)']
     if s['iIndex'] == 751866:
         s['sQuestion'] = s['sQuestion'].replace('5c and 10c', '0.05 and 0.10')
+    if s['iIndex'] == 488492:
+        s['lEquations'][1] = s['lEquations'][1].replace('1.0', '1')
+    if s['iIndex'] == 386580:
+        s['sQuestion'] = s['sQuestion'].replace('Two', '2').replace('three', '3')
     return s
 
 

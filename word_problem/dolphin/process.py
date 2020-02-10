@@ -1,4 +1,5 @@
 # coding=utf8
+import collections
 import re
 from collections import Counter
 
@@ -299,30 +300,30 @@ class QuestionAnswerParser:
         except:
             print('the number of unknowns out of bound', unknowns)
         new_segs = []
-        num_pos = []
         eq_segs = []
+        # nums_in_text = ['1', '2', '1', '4']
+        nums_pos_dict = collections.OrderedDict()
+        for num in float_numbers_in_text:
+            if num not in nums_pos_dict:
+                nums_pos_dict[num] = []
+
         for i, s in enumerate(segs):
             # 句子中出现类似'm/10'这种公式中的部分内容处理不了
             if s in numbers_in_text:
                 new_segs.append('n')
-                num_pos.append(i)
+                nums_pos_dict[round(to_float(s), 5)].append(str(i))
             elif _extract_nums(s, no_percent) and round(to_float(s), 5) in float_numbers_in_text:
                 new_segs.append('n')
-                num_pos.append(i)
+                nums_pos_dict[round(to_float(s), 5)].append(str(i))
             else:
                 new_segs.append(s)
-        float_nums_dict = {round(to_float(n), 5): str(i) for i, n in enumerate(numbers_in_text)}
-        origin_nums_dict = {n: str(i) for i, n in enumerate(numbers_in_text)}
+        nums_index_dict = {n: str(i) for i, n in enumerate(nums_pos_dict)}
         for eq in eqs:
             eq_seg = []
             for e in eq:
                 if e in numbers_in_eqs:
-                    if round(to_float(e), 5) in float_nums_dict:
-                        # nums_in_text中既出现2，又出现2.00，优先按origin_nums_dict来找index
-                        if e in origin_nums_dict:
-                            eq_seg.append('N{}'.format(origin_nums_dict[e]))
-                        else:
-                            eq_seg.append('N{}'.format(float_nums_dict[round(to_float(e), 5)]))
+                    if round(to_float(e), 5) in nums_index_dict:
+                        eq_seg.append('N{}'.format(nums_index_dict[round(to_float(e), 5)]))
                     else:
                         eq_seg.append(e)
                 elif e in unk_dict:
@@ -330,7 +331,7 @@ class QuestionAnswerParser:
                 else:
                     eq_seg.append(e)
             eq_segs.append(eq_seg)
-        return new_segs, eq_segs, numbers_in_text, num_pos
+        return new_segs, eq_segs, numbers_in_text, nums_pos_dict
 
     def parse(self, no_percent=False):
         qa = self.qa
@@ -499,11 +500,17 @@ implied_ents = [{'id': '1', 'tokens': 'sp1', 'type': 'num'},
                 {'id': '30', 'tokens': 'sp30', 'type': 'num'},
                 {'id': '0.01', 'tokens': 'sp0.01', 'type': 'num'},
                 {'id': 'pi', 'tokens': 'sp_pi', 'type': 'num'}]
+implied_multi_ents = [{'id': '1', 'tokens': ['sp1'], 'type': 'num'},
+                      {'id': '4', 'tokens': ['sp4'], 'type': 'num'},
+                      {'id': '60', 'tokens': ['sp60'], 'type': 'num'},
+                      {'id': '2', 'tokens': ['sp2'], 'type': 'num'},
+                      {'id': '10', 'tokens': ['sp10'], 'type': 'num'}]
 imp_word_dict = {w['word']: w for w in implied_words}
 imp_ent_dict = {w['id']: w for w in implied_ents}
+imp_multi_ent_dict = {w['id']: w for w in implied_multi_ents}
 
 
-def pairs_to_utie(pairs, unk_nums):
+def pairs_to_utie(pairs, unk_nums, multi=False):
     from collections import OrderedDict
     new_data = []
     for pid, pair in pairs.items():
@@ -512,19 +519,26 @@ def pairs_to_utie(pairs, unk_nums):
         relations = []
         imply_nums = x[-2]
         imply_ns = []
+        nums_pos_dict = x[3]
         for n in imply_nums:
             if n == '3.14':
                 imply_ns.append('pi')
             else:
                 imply_ns.append(n)
         imply_words = [imp_word_dict[i_num] for i_num in imply_ns]
-        imply_ents = [imp_ent_dict[i_num] for i_num in imply_ns]
+        if multi:
+            imply_ents = [imp_multi_ent_dict[i_num] for i_num in imply_ns]
+            unk_ents = [{'id': 'x', 'tokens': ['unk1'], 'type': 'unk'},
+                        {'id': 'y', 'tokens': ['unk2'], 'type': 'unk'},
+                        {'id': 'z', 'tokens': ['unk3'], 'type': 'unk'}]
+        else:
+            imply_ents = [imp_ent_dict[i_num] for i_num in imply_ns]
+            unk_ents = [{'id': 'x', 'tokens': 'unk1', 'type': 'unk'},
+                        {'id': 'y', 'tokens': 'unk2', 'type': 'unk'},
+                        {'id': 'z', 'tokens': 'unk3', 'type': 'unk'}]
         unk_words = [{'word': 'x', 'id': 'unk1'},
-                        {'word': 'y', 'id': 'unk2'},
-                        {'word': 'z', 'id': 'unk3'}]
-        unk_ents = [{'id': 'x', 'tokens': 'unk1', 'type': 'unk'},
-                       {'id': 'y', 'tokens': 'unk2', 'type': 'unk'},
-                       {'id': 'z', 'tokens': 'unk3', 'type': 'unk'}]
+                     {'word': 'y', 'id': 'unk2'},
+                     {'word': 'z', 'id': 'unk3'}]
         extend_words = unk_words[0:unk_nums]
         extend_ents = unk_ents[0:unk_nums]
         extend_words.extend(imply_words)
@@ -542,13 +556,22 @@ def pairs_to_utie(pairs, unk_nums):
             except:
                 print('failed to relations: ', infix_expression)
         w_dict = {'”': '"', '“': '"', u'”': '"', u'“': '"', '\u3000': ' ', '\uff1f': ' '}
-        sample = {
-            'info': {'sid': pid, 'q': x},
-            'words': [{'word': w_dict.get(w, w), 'id': str(i)} for i, w in enumerate(x[0])] + extend_words,
-            'entities': [{'id': 'N{}'.format(i), 'tokens': str(v), 'type': 'num'} for i, v in
-                         enumerate(x[3])] + extend_ents,
-            'relations': relations
-        }
+        if multi:
+            sample = {
+                'info': {'sid': pid, 'q': x},
+                'words': [{'word': w_dict.get(w, w), 'id': str(i)} for i, w in enumerate(x[0])] + extend_words,
+                'entities': [{'id': 'N{}'.format(i), 'tokens': nums_pos_dict[v], 'type': 'num'} for i, v in
+                             enumerate(nums_pos_dict)] + extend_ents,
+                'relations': relations
+            }
+        else:
+            sample = {
+                'info': {'sid': pid, 'q': x},
+                'words': [{'word': w_dict.get(w, w), 'id': str(i)} for i, w in enumerate(x[0])] + extend_words,
+                'entities': [{'id': 'N{}'.format(i), 'tokens': str(v), 'type': 'num'} for i, v in
+                             enumerate(x[3])] + extend_ents,
+                'relations': relations
+            }
         add_significant_number(sample)
         try:
             sample = reid(sample, unordered_types=['+', '*', '='], readable=False)

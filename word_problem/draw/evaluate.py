@@ -44,7 +44,6 @@ def solve_equations(equations, precision):
             answer = [round(float(v), precision) for k, v in answer.items()]
     except:
         answer = []
-        print('wrong format of answer: ', answer)
     return answer
 
 
@@ -181,17 +180,23 @@ def predict_relation_to_eqs_multi(predict_sample):
     rel2eq = {}
     _, origin_eqs, _, values_dict, _, origin_ans = predict_sample['info']['q']
     wid_value_dict = {}
+    idx_list = []
     for v in values_dict:
         for wid in values_dict[v]:
             wid_value_dict[wid] = v
+            idx_list.append(int(wid))
+    idx_list.sort()
     wid2value = {}
     ent2v = {}
     eqs = []
     eq_corresponding_rids = []
     eq2prob_dict = {}
+    idx_num = 0
     for i, w in enumerate(predict_sample['words']):
-        if w['word'] == 'n' and not predict_sample['words'][i + 1]['word'].startswith('##'):
-            wid2value[w['id']] = wid_value_dict[w['id'][1:w['id'].index('|')]]
+        if w['word'] == 'n' and idx_num < len(idx_list) and not (predict_sample['words'][i + 1]['word'].startswith('##') or
+                                                                  predict_sample['words'][i + 1]['word'].startswith("'")):
+            wid2value[w['id']] = wid_value_dict[str(idx_list[idx_num])]
+            idx_num += 1
         else:
             wid2value[w['id']] = w['word']
     for e in predict_sample['entities']:
@@ -268,6 +273,13 @@ def process_dolphin_ans(origin_ans, precision):
 
 
 def include_origin_eqs(predict_eqs, origin_eqs_length, origin_ans, precision):
+    """通过组合预测出的所有方程来找出能算出正确答案的组合
+    :param predict_eqs:
+    :param origin_eqs_length:
+    :param origin_ans:
+    :param precision:
+    :return:
+    """
     combs = itertools.combinations(predict_eqs, origin_eqs_length)
     for comb in combs:
         comb_eqs_ans = solve_equations(comb, precision)
@@ -295,6 +307,10 @@ def cumulative_prob(sample):
 
 
 def get_predict_unks_num(predict_eqs):
+    """获得预测出的所有公式中未知数的个数，来确定最终的方程组中方程的个数
+    :param predict_eqs:
+    :return:
+    """
     unks_num = 0
     for eq in predict_eqs:
         num = 0
@@ -310,6 +326,13 @@ def get_predict_unks_num(predict_eqs):
 
 
 def get_predict_eq_comb(predict_eqs, unks_num, eq2prob_dict, precision):
+    """找出预测出的所有公式中概率最大的公式组合
+    :param predict_eqs:
+    :param unks_num:
+    :param eq2prob_dict:
+    :param precision:
+    :return:
+    """
     combs = itertools.combinations(predict_eqs, unks_num)
     max_prob = 0
     max_comb = ()
@@ -327,10 +350,24 @@ def get_predict_eq_comb(predict_eqs, unks_num, eq2prob_dict, precision):
     return max_comb, max_comb_ans, max_prob
 
 
-def evaluate(log_path, data_path, precision=3, dolphin=False):
-    tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=False)
+def evaluate(log_path, data_path, precision=3, dolphin=False, use_best=False):
+    """
+    :param log_path: 训练模型时生成的日志文件存放路径
+    :param data_path: 用来评估的数据集路径
+    :param precision: 判断答案是否相等时保留的精度
+    :param dolphin: 用来评估的是dolphin数据的话为True
+    :param use_best: 是否用最好的模型
+    :return:
+    """
+    tppl = TestPipeline(log_path, data_path=data_path, config_path=None, use_best=use_best)
     performance, indicator, wrong_sids, correct_sids = tppl.evaluate()
     predict_samples = tppl.predicted
+    def remove_S(samples):
+        for sample in samples:
+            rels = [rel for rel in sample['relations'] if rel['type'] != 'S']
+            sample['relations'] = rels
+        return samples
+    predict_samples = remove_S(predict_samples)
     sample_num = len(predict_samples)
     avail_results = filted_data(predict_samples)
     right_num = 0
@@ -403,5 +440,6 @@ if __name__ == '__main__':
     parser.add_argument('data_path')
     parser.add_argument('precision')
     parser.add_argument('dolphin')
+    parser.add_argument('use_best')
     parser = parser.parse_args()
-    evaluate(parser.log_path, parser.data_path, parser.precision, parser.dolphin)
+    evaluate(parser.log_path, parser.data_path, parser.precision, parser.dolphin, parser.use_best)
