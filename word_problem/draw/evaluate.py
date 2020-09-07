@@ -374,10 +374,12 @@ def evaluate(log_path, data_path, precision=3, dolphin=False, use_best=False):
     right_num_fixed = 0
     right_comb_num = 0
     include_num = 0
+    predict_eqs_num = 0
     for predict_sample in avail_results:
         predict_sample = cumulative_prob(predict_sample)
         try:
             predict_eqs, _, eq2prob_dict = predict_relation_to_eqs_multi(predict_sample)
+            predict_eqs_num += len(predict_eqs)
             # predict_eqs, _ = predict_relation_to_eqs(predict_sample)
             unks_num = get_predict_unks_num(predict_eqs)
             eq_comb, comb_ans, comb_cum_p = get_predict_eq_comb(predict_eqs, unks_num, eq2prob_dict, precision)
@@ -420,12 +422,13 @@ def evaluate(log_path, data_path, precision=3, dolphin=False, use_best=False):
     output = """
     -------------------------------------------------------
     test_performance: {}
+    predict equations num: {}
     predict comb acc: {}({})
     answer compared with origin acc: {}({})
     answer compared with real acc: {}({})
     predict equations included origin equations acc: {}({})
     -------------------------------------------------------
-    """.format(performance,
+    """.format(performance, predict_eqs_num,
                round(float(right_comb_num) / float(sample_num) * 100, 2), right_comb_num,
                round(float(right_num) / float(sample_num) * 100, 2), right_num,
                round(float(right_num_fixed) / float(sample_num) * 100, 2), right_num_fixed,

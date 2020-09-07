@@ -415,11 +415,14 @@ def infix_to_relation_with_equal(index, rel_nums, infix_expression):
     return relations
 
 
-def generate_relations(index, rel_nums, infixs):
+def generate_relations(index, rel_nums, infixs, ordered=False):
+    import random
     relations = []
     tree = postfix_to_tree_with_equal(infix_to_postfix(infixs[0]), rel_nums)
     if isinstance(tree, Tree):
         for n in tree.traverse():
+            if ordered and n[-1] in ['+', '*'] and random.random() <= 0.5:
+                n[1], n[2] = n[2], n[1]
             relations.append({'id': n[0], 'operands': [n[1], n[2]], 'type': n[-1]})
             rel_nums += 1
         left = relations[-1]['id']
@@ -428,11 +431,15 @@ def generate_relations(index, rel_nums, infixs):
     tree = postfix_to_tree_with_equal(infix_to_postfix(infixs[1]), rel_nums)
     if isinstance(tree, Tree):
         for n in tree.traverse():
+            if ordered and n[-1] in ['+', '*'] and random.random() <= 0.5:
+                n[1], n[2] = n[2], n[1]
             relations.append({'id': n[0], 'operands': [n[1], n[2]], 'type': n[-1]})
             rel_nums += 1
         right = relations[-1]['id']
     else:
         right = tree
+    if ordered and random.random() <= 0.5:
+        left, right = right, left
     relations.append({'id': 'eq' + str(index), 'operands': [left, right], 'type': '='})
     return relations
 
