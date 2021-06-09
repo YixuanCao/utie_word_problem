@@ -31,8 +31,6 @@ open jupyter
 - 解析公式，变成 relations
   主要步骤  
 
-mold 来自 http://tl.bondowner.cn:8086/static/index.html#/molds 数学计算-无序-SNI
-
 
 
 ### `dolphin18k.ipynp`  
